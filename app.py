@@ -9,21 +9,27 @@ import time
 from datetime import datetime
 
 # ==============================================================================
-# 1. SAYFA & MODERN KOYU LÜKS TEMA (ÖZEL CSS İLE ÜST MENÜ & KART TASARIMI)
+# 1. SAYFA KONFİGÜRASYONU & ÖZEL CSS (ÜST MENÜ ÇAKIŞMASI DÜZELTİLMİŞ)
 # ==============================================================================
 st.set_page_config(
-    page_title="Zettaishi Finvest - Premium Portföy & Varlık Yönetimi",
+    page_title="Zettaishi - Portföy & Varlık Yönetimi",
     page_icon="💎",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
 
-# Sol menüyü tamamen gizleyip modern üst navigasyon ve dashboard tasarımı enjekte eden CSS
+# Streamlit varsayılan başlık/menülerini gizleyen ve özel arayüzü oturtan CSS
 st.markdown("""
 <style>
-    /* Streamlit varsayılan sidebar ve boşlukları gizleme */
+    /* Streamlit varsayılan üst menü, header ve footer'ını tamamen gizleme */
+    #MainMenu {visibility: hidden !important;}
+    header {visibility: hidden !important;}
+    footer {visibility: hidden !important;}
+    [data-testid="stHeader"] {display: none !important;}
     [data-testid="collapsedControl"] { display: none !important; }
     section[data-testid="stSidebar"] { display: none !important; }
+
+    /* Sayfa Üst Boşluk Optimizasyonu */
     .block-container {
         padding-top: 1.5rem !important;
         padding-bottom: 3rem !important;
@@ -35,7 +41,7 @@ st.markdown("""
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
 
-    /* Üst Header Kartı */
+    /* Üst Navigasyon Kartı */
     .top-navbar {
         background: linear-gradient(180deg, rgba(30, 41, 59, 0.7) 0%, rgba(15, 23, 42, 0.8) 100%);
         border: 1px solid rgba(51, 65, 85, 0.6);
@@ -46,7 +52,7 @@ st.markdown("""
         box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
     }
 
-    /* Metrik Kartları */
+    /* Metrik Cam Kartları */
     .glass-card {
         background: linear-gradient(135deg, rgba(30, 41, 59, 0.5) 0%, rgba(15, 23, 42, 0.7) 100%);
         border: 1px solid rgba(51, 65, 85, 0.5);
@@ -61,7 +67,7 @@ st.markdown("""
         transform: translateY(-2px);
     }
 
-    /* Yeniden Dengeleme Rozetleri */
+    /* Yeniden Dengeleme Kartları */
     .reb-badge-buy {
         background: rgba(16, 185, 129, 0.12);
         border: 1px solid rgba(16, 185, 129, 0.4);
@@ -79,7 +85,7 @@ st.markdown("""
         margin-bottom: 12px;
     }
 
-    /* Form Girişleri & Butonlar */
+    /* Input & Buton Şekillendirmeleri */
     .stTextInput>div>div>input, .stNumberInput>div>div>input, .stSelectbox>div>div {
         background-color: #1e293b !important;
         color: #f8fafc !important;
@@ -96,7 +102,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 2. ŞİFRE GÜVENLİĞİ & YARDIMCI HESAPLAMA MOTORU
+# 2. ŞİFRE DOĞRULAMA & HESAPLAMA MOTORU
 # ==============================================================================
 def hash_password(password: str) -> str:
     return hashlib.sha256(password.strip().encode()).hexdigest()
@@ -162,7 +168,7 @@ def fetch_live_prices(symbols_tuple):
     return prices
 
 # ==============================================================================
-# 3. VERİTABANI İLKLENDİRME (SIFIR MOCK VERİ)
+# 3. VERİTABANI İLKLENDİRME (SIFIR SAHTE VERİ MANTIĞI)
 # ==============================================================================
 DEFAULT_CATEGORIES = [
     {"id": "BIST", "name": "Borsa İstanbul", "targetPercent": 25.0, "color": "#3b82f6"},
@@ -201,17 +207,17 @@ def get_user_db():
     return st.session_state.db[email]
 
 # ==============================================================================
-# 4. ŞIK KİMLİK DOĞRULAMA (LOGIN / REGISTER MODALI)
+# 4. GÜVENLİ GİRİŞ & KAYIT EKRANI
 # ==============================================================================
 if not st.session_state.current_user:
-    st.markdown("<div style='height:40px;'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='height:30px;'></div>", unsafe_allow_html=True)
     c_center = st.columns([1, 2, 1])[1]
     
     with c_center:
         st.markdown("""
         <div class="top-navbar" style="text-align: center;">
-            <h1 style="color: #60a5fa; margin: 0; font-size: 28px;">💎 Zettaishi Finvest</h1>
-            <p style="color: #94a3b8; margin-top: 6px; font-size: 14px;">Güvenli, Şifreli & Profesyonel Portföy Yönetim Platformu</p>
+            <h1 style="color: #60a5fa; margin: 0; font-size: 28px;">💎 Zettaishi</h1>
+            <p style="color: #94a3b8; margin-top: 6px; font-size: 14px;">Güvenli & Profesyonel Portföy Yönetim Konsolu</p>
         </div>
         """, unsafe_allow_html=True)
         
@@ -235,8 +241,6 @@ if not st.session_state.current_user:
                 else:
                     st.error("Bu e-posta adresine kayıtlı kullanıcı bulunamadı.")
             
-            st.info("💡 **Yönetici Girişi:** `admin@invest.local` | Şifre: `123456`")
-            
         with tab_register:
             st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True)
             r_name = st.text_input("Adınız & Soyadınız", placeholder="Örn: Ahmet Yılmaz", key="auth_r_name")
@@ -251,7 +255,7 @@ if not st.session_state.current_user:
                 elif len(r_pwd) < 6:
                     st.error("Şifreniz en az 6 karakter olmalıdır.")
                 elif r_pwd != r_pwd_c:
-                    st.error("Girdiğiniz şifreler uyuşmuyor.")
+                    st.error("Girdiğiniz şifreler birbiriyle uyuşmuyor.")
                 elif c_email in st.session_state.users:
                     st.error("Bu e-posta adresi zaten sisteme kayıtlı.")
                 else:
@@ -265,12 +269,12 @@ if not st.session_state.current_user:
                         "name": r_name.strip(),
                         "role": "USER"
                     }
-                    st.success("Hesabınız sıfır portföy bakiyesi ile açıldı! Yönlendiriliyorsunuz...")
+                    st.success("Hesabınız sıfır portföy ile başarıyla açıldı!")
                     st.rerun()
     st.stop()
 
 # ==============================================================================
-# 5. ANA PANEL: MODERN ÜST NAVİGASYON (HEADER & NAVBAR)
+# 5. ANA PANEL: MODERN ÜST NAVİGASYON (HEADER)
 # ==============================================================================
 user_db = get_user_db()
 rates = get_exchange_rates()
@@ -282,7 +286,7 @@ with head_col1:
     <div style="display:flex; align-items:center; gap:12px;">
         <div style="background:#2563eb; width:42px; height:42px; border-radius:12px; display:flex; align-items:center; justify-content:center; font-size:22px;">💎</div>
         <div>
-            <h2 style="margin:0; font-size:20px; color:#fff; font-weight:700;">Zettaishi Finvest</h2>
+            <h2 style="margin:0; font-size:20px; color:#fff; font-weight:700;">Zettaishi</h2>
             <p style="margin:0; font-size:12px; color:#94a3b8;">Portföy & Varlık Yönetim Konsolu</p>
         </div>
     </div>
@@ -313,7 +317,7 @@ with head_col3:
 
 st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
 
-# ÜST MENÜ TABLARI (TOP NAVIGATION BAR)
+# ÜST MENÜ TABLARI (TOP NAVIGATION)
 active_tab = st.radio(
     "Navigasyon",
     ["📊 Portföy Dashboard", "➕ İşlem Ekle", "⚖️ Yeniden Dengeleme (Rebalance)", "💵 Nakit Cüzdanı", "🎯 Hedef & Kategori Ayarları", "📜 İşlem Geçmişi"],
@@ -408,7 +412,6 @@ if active_tab == "📊 Portföy Dashboard":
     total_pnl = total_portfolio_value_base - total_portfolio_cost_base
     total_pnl_pct = (total_pnl / total_portfolio_cost_base * 100) if total_portfolio_cost_base > 0 else 0.0
     
-    # 4'lü Metrik Kartları
     m1, m2, m3, m4 = st.columns(4)
     with m1:
         st.markdown(f"""
@@ -552,7 +555,7 @@ elif active_tab == "➕ İşlem Ekle":
             st.rerun()
 
 # ==============================================================================
-# 9. SAYFA: YENİDEN DENGELEME MOTORU (REBALANCE)
+# 9. SAYFA: YENİDEN DENGELEME (REBALANCE)
 # ==============================================================================
 elif active_tab == "⚖️ Yeniden Dengeleme (Rebalance)":
     st.markdown("### ⚖️ Akıllı Yeniden Dengeleme (Rebalance) Önerileri")
