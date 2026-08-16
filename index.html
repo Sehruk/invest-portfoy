@@ -1,1 +1,1138 @@
+<!DOCTYPE html>
+<html lang="tr" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Zettaishi - Portföy & Varlık Yönetimi</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💎</text></svg>">
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: { 500: '#3b82f6', 600: '#2563eb', 700: '#1d4ed8' },
+            dark: { 800: '#1e293b', 900: '#0f172a', 950: '#030712' }
+          }
+        }
+      }
+    }
+  </script>
 
+  <!-- React 18 & Babel & Lucide Icons CDN -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- Chart.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <style>
+    body {
+      background-color: #030712;
+      color: #f8fafc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    .glass-panel {
+      background: linear-gradient(135deg, rgba(30, 41, 59, 0.7) 0%, rgba(15, 23, 42, 0.85) 100%);
+      border: 1px solid rgba(51, 65, 85, 0.6);
+      backdrop-filter: blur(12px);
+    }
+    .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.6); }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(51, 65, 85, 0.8); border-radius: 4px; }
+  </style>
+</head>
+<body class="min-h-screen custom-scrollbar">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useMemo, useRef } = React;
+
+    // --- 1. SABİTLER & VARSAYILAN KATEGORİLER ---
+    const DEFAULT_CATEGORIES = [
+      { id: 'BIST', name: 'Borsa İstanbul', targetPercent: 25.0, color: '#3b82f6' },
+      { id: 'US_EQUITY', name: 'ABD & Global Hisse', targetPercent: 30.0, color: '#10b981' },
+      { id: 'GOLD', name: 'Altın & Değerli Maden', targetPercent: 15.0, color: '#f59e0b' },
+      { id: 'CRYPTO', name: 'Kripto Varlıklar', targetPercent: 10.0, color: '#8b5cf6' },
+      { id: 'EUROBOND', name: 'Eurobond & Tahvil', targetPercent: 10.0, color: '#06b6d4' },
+      { id: 'CASH', name: 'Nakit Rezerv (Dry Powder)', targetPercent: 10.0, color: '#64748b' }
+    ];
+
+    const MOCK_RATES = { USD_TRY: 34.20, EUR_TRY: 37.10, EUR_USD: 1.08 };
+
+    // Şifre Hash Yardımcısı
+    function hashPassword(str) {
+      if (!str) return '';
+      let hash = 0;
+      for (let i = 0; i < str.length; i++) {
+        hash = (hash << 5) - hash + str.charCodeAt(i);
+        hash |= 0;
+      }
+      return `pwd_${Math.abs(hash)}_${str.length}`;
+    }
+
+    function App() {
+      // --- 2. LOCAL STORAGE & KULLANICI YÖNETİMİ ---
+      const [users, setUsers] = useState(() => {
+        const saved = localStorage.getItem('zettaishi_users_v2');
+        if (saved) return JSON.parse(saved);
+        return [{
+          id: 'usr_admin',
+          email: 'admin@invest.local',
+          name: 'Şehruk',
+          password: hashPassword('123456'),
+          role: 'ADMIN'
+        }];
+      });
+
+      const [currentUser, setCurrentUser] = useState(() => {
+        const activeId = localStorage.getItem('zettaishi_active_user_v2');
+        if (activeId) {
+          const found = users.find(u => u.id === activeId);
+          if (found) return found;
+        }
+        return users[0];
+      });
+
+      const [baseCurrency, setBaseCurrency] = useState('TRY');
+      const [rates, setRates] = useState(MOCK_RATES);
+
+      // Kullanıcıya Özel Portföy Verileri
+      const [transactions, setTransactions] = useState([]);
+      const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
+      const [walletTxs, setWalletTxs] = useState([]);
+      const [manualValuations, setManualValuations] = useState({});
+
+      // Modallar
+      const [activeModal, setActiveModal] = useState(null); // 'ADD_TX' | 'WALLET' | 'SETTINGS' | 'ADMIN' | 'AUTH'
+
+      // Form State'leri
+      const [authTab, setAuthTab] = useState('LOGIN');
+      const [loginEmail, setLoginEmail] = useState('');
+      const [loginPassword, setLoginPassword] = useState('');
+      const [regName, setRegName] = useState('');
+      const [regEmail, setRegEmail] = useState('');
+      const [regPassword, setRegPassword] = useState('');
+      const [regPasswordConfirm, setRegPasswordConfirm] = useState('');
+      const [authError, setAuthError] = useState('');
+
+      // Yeni İşlem Formu
+      const [txType, setTxType] = useState('BUY');
+      const [txSymbol, setTxSymbol] = useState('');
+      const [txName, setTxName] = useState('');
+      const [txCat, setTxCat] = useState('BIST');
+      const [txQty, setTxQty] = useState(10);
+      const [txPrice, setTxPrice] = useState(100);
+      const [txCurrency, setTxCurrency] = useState('TRY');
+      const [txDate, setTxDate] = useState(new Date().toISOString().split('T')[0]);
+      const [txDeductWallet, setTxDeductWallet] = useState(false);
+
+      // Cüzdan Formu
+      const [walletAction, setWalletAction] = useState('DEPOSIT');
+      const [walletAmount, setWalletAmount] = useState(5000);
+      const [walletCurr, setWalletCurr] = useState('TRY');
+
+      // Ayarlar Kategori Düzenleme Formu
+      const [tempCategories, setTempCategories] = useState(DEFAULT_CATEGORIES);
+
+      // --- 3. VERİLERİ YÜKLEME & SENKRONİZASYON ---
+      useEffect(() => {
+        if (!currentUser) return;
+        localStorage.setItem('zettaishi_active_user_v2', currentUser.id);
+        
+        // Kullanıcı bazlı izole verileri yükle
+        const savedTx = localStorage.getItem(`zettaishi_${currentUser.id}_txs`);
+        const savedCats = localStorage.getItem(`zettaishi_${currentUser.id}_cats`);
+        const savedWallet = localStorage.getItem(`zettaishi_${currentUser.id}_wallet`);
+        const savedVals = localStorage.getItem(`zettaishi_${currentUser.id}_vals`);
+        const savedCurr = localStorage.getItem(`zettaishi_${currentUser.id}_curr`);
+
+        setTransactions(savedTx ? JSON.parse(savedTx) : []);
+        setCategories(savedCats ? JSON.parse(savedCats) : DEFAULT_CATEGORIES);
+        setTempCategories(savedCats ? JSON.parse(savedCats) : DEFAULT_CATEGORIES);
+        setWalletTxs(savedWallet ? JSON.parse(savedWallet) : []);
+        setManualValuations(savedVals ? JSON.parse(savedVals) : {});
+        if (savedCurr) setBaseCurrency(savedCurr);
+      }, [currentUser]);
+
+      // Değişiklikleri Kaydet
+      const saveUserData = (newTx, newCats, newWallet, newVals, newCurr) => {
+        if (!currentUser) return;
+        if (newTx !== undefined) {
+          setTransactions(newTx);
+          localStorage.setItem(`zettaishi_${currentUser.id}_txs`, JSON.stringify(newTx));
+        }
+        if (newCats !== undefined) {
+          setCategories(newCats);
+          localStorage.setItem(`zettaishi_${currentUser.id}_cats`, JSON.stringify(newCats));
+        }
+        if (newWallet !== undefined) {
+          setWalletTxs(newWallet);
+          localStorage.setItem(`zettaishi_${currentUser.id}_wallet`, JSON.stringify(newWallet));
+        }
+        if (newVals !== undefined) {
+          setManualValuations(newVals);
+          localStorage.setItem(`zettaishi_${currentUser.id}_vals`, JSON.stringify(newVals));
+        }
+        if (newCurr !== undefined) {
+          setBaseCurrency(newCurr);
+          localStorage.setItem(`zettaishi_${currentUser.id}_curr`, newCurr);
+        }
+      };
+
+      // --- 4. PARA BİRİMİ DÖNÜŞTÜRÜCÜSÜ ---
+      const convert = (amount, from, to) => {
+        if (from === to || !amount) return amount || 0;
+        let inTRY = amount;
+        if (from === 'USD') inTRY = amount * rates.USD_TRY;
+        else if (from === 'EUR') inTRY = amount * rates.EUR_TRY;
+
+        if (to === 'TRY') return inTRY;
+        if (to === 'USD') return inTRY / rates.USD_TRY;
+        if (to === 'EUR') return inTRY / rates.EUR_TRY;
+        return inTRY;
+      };
+
+      const formatMoney = (val, curr = baseCurrency) => {
+        const syms = { TRY: '₺', USD: '$', EUR: '€' };
+        const sym = syms[curr] || '₺';
+        return `${sym}${Number(val || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      };
+
+      // --- 5. CÜZDAN & PORTFÖY HESAPLAMALARI ---
+      const walletBalances = useMemo(() => {
+        const bals = { TRY: 0, USD: 0, EUR: 0 };
+        walletTxs.forEach(w => {
+          const c = w.currency || 'TRY';
+          if (['DEPOSIT', 'SELL_CREDIT', 'DIVIDEND'].includes(w.type)) bals[c] += w.amount;
+          else if (['WITHDRAW', 'BUY_DEDUCT'].includes(w.type)) bals[c] -= w.amount;
+        });
+        return bals;
+      }, [walletTxs]);
+
+      const walletTotalBase = useMemo(() => {
+        return convert(walletBalances.TRY, 'TRY', baseCurrency) +
+               convert(walletBalances.USD, 'USD', baseCurrency) +
+               convert(walletBalances.EUR, 'EUR', baseCurrency);
+      }, [walletBalances, baseCurrency, rates]);
+
+      // Varlıkları Grupla
+      const holdings = useMemo(() => {
+        const map = {};
+        const sorted = [...transactions].sort((a, b) => new Date(a.date) - new Date(b.date));
+        sorted.forEach(t => {
+          const sym = t.symbol.toUpperCase();
+          if (!map[sym]) {
+            map[sym] = {
+              symbol: sym,
+              name: t.name || sym,
+              category: t.category,
+              currency: t.currency || 'TRY',
+              quantity: 0,
+              totalCostNative: 0
+            };
+          }
+          if (t.type === 'BUY') {
+            map[sym].quantity += t.quantity;
+            map[sym].totalCostNative += t.quantity * t.price;
+          } else if (t.type === 'SELL') {
+            if (map[sym].quantity > 0) {
+              const avg = map[sym].totalCostNative / map[sym].quantity;
+              const deduct = Math.min(t.quantity, map[sym].quantity);
+              map[sym].quantity -= deduct;
+              map[sym].totalCostNative -= avg * deduct;
+            }
+          }
+        });
+
+        const list = [];
+        let totalVal = 0;
+        let totalCost = 0;
+
+        Object.values(map).forEach(h => {
+          if (h.quantity <= 0.0001) return;
+          const avgPrice = h.totalCostNative / h.quantity;
+          // Fiyat manual veya ortalama maliyet fallback
+          const currPrice = manualValuations[h.symbol] || avgPrice;
+          const valNative = h.quantity * currPrice;
+          const valBase = convert(valNative, h.currency, baseCurrency);
+          const costBase = convert(h.totalCostNative, h.currency, baseCurrency);
+          const pnlBase = valBase - costBase;
+          const pnlPct = avgPrice > 0 ? ((currPrice - avgPrice) / avgPrice) * 100 : 0;
+
+          totalVal += valBase;
+          totalCost += costBase;
+
+          const catObj = categories.find(c => c.id === h.category);
+
+          list.push({
+            ...h,
+            avgPrice,
+            currPrice,
+            valBase,
+            costBase,
+            pnlBase,
+            pnlPct,
+            categoryName: catObj ? catObj.name : h.category
+          });
+        });
+
+        return { list, totalVal, totalCost, totalAssets: totalVal + walletTotalBase };
+      }, [transactions, categories, manualValuations, baseCurrency, rates, walletTotalBase]);
+
+      // --- 6. CHART.JS ENTEGRASYONU ---
+      const chartRef = useRef(null);
+      const chartInstance = useRef(null);
+
+      useEffect(() => {
+        if (!chartRef.current) return;
+        const ctx = chartRef.current.getContext('2d');
+        if (chartInstance.current) chartInstance.current.destroy();
+
+        if (holdings.list.length === 0) return;
+
+        // Kategori bazlı toplam değer
+        const catMap = {};
+        holdings.list.forEach(h => {
+          catMap[h.categoryName] = (catMap[h.categoryName] || 0) + h.valBase;
+        });
+
+        const labels = Object.keys(catMap);
+        const data = Object.values(catMap);
+        const colors = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#06b6d4', '#ec4899', '#64748b'];
+
+        chartInstance.current = new Chart(ctx, {
+          type: 'doughnut',
+          data: {
+            labels,
+            datasets: [{
+              data,
+              backgroundColor: colors.slice(0, labels.length),
+              borderWidth: 2,
+              borderColor: '#0f172a'
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { position: 'bottom', labels: { color: '#94a3b8', font: { size: 11 } } }
+            },
+            cutout: '70%'
+          }
+        });
+
+        return () => {
+          if (chartInstance.current) chartInstance.current.destroy();
+        };
+      }, [holdings, activeModal]);
+
+      // --- 7. AUTH İŞLEMLERİ ---
+      const handleAuthLogin = (e) => {
+        e.preventDefault();
+        setAuthError('');
+        const found = users.find(u => u.email.toLowerCase() === loginEmail.trim().toLowerCase());
+        if (!found) {
+          setAuthError('Bu e-posta adresine ait kayıtlı kullanıcı bulunamadı.');
+          return;
+        }
+        if (found.password && found.password !== hashPassword(loginPassword.trim())) {
+          setAuthError('Girdiğiniz şifre hatalı. Lütfen tekrar deneyiniz.');
+          return;
+        }
+        setCurrentUser(found);
+        setActiveModal(null);
+        setLoginPassword('');
+      };
+
+      const handleAuthRegister = (e) => {
+        e.preventDefault();
+        setAuthError('');
+        if (!regName.trim() || !regEmail.trim()) {
+          setAuthError('Lütfen adınızı ve e-posta adresinizi giriniz.');
+          return;
+        }
+        if (regPassword.length < 6) {
+          setAuthError('Şifreniz en az 6 karakter olmalıdır.');
+          return;
+        }
+        if (regPassword !== regPasswordConfirm) {
+          setAuthError('Girdiğiniz şifreler birbiriyle uyuşmuyor.');
+          return;
+        }
+        if (users.some(u => u.email.toLowerCase() === regEmail.trim().toLowerCase())) {
+          setAuthError('Bu e-posta adresi zaten sisteme kayıtlı.');
+          return;
+        }
+
+        const newUser = {
+          id: `usr_${Date.now()}`,
+          email: regEmail.trim().toLowerCase(),
+          name: regName.trim(),
+          password: hashPassword(regPassword.trim()),
+          role: 'USER'
+        };
+
+        const updatedUsers = [...users, newUser];
+        setUsers(updatedUsers);
+        localStorage.setItem('zettaishi_users_v2', JSON.stringify(updatedUsers));
+        setCurrentUser(newUser);
+        setActiveModal(null);
+        setRegName('');
+        setRegEmail('');
+        setRegPassword('');
+        setRegPasswordConfirm('');
+      };
+
+      // --- 8. YENİ İŞLEM EKLEME ---
+      const handleAddTx = (e) => {
+        e.preventDefault();
+        if (!txSymbol.trim()) return;
+        const totalCostNative = txQty * txPrice;
+
+        const newTx = {
+          id: `tx_${Date.now()}`,
+          symbol: txSymbol.trim().toUpperCase(),
+          name: txName.trim() || txSymbol.trim().toUpperCase(),
+          category: txCat,
+          type: txType,
+          quantity: Number(txQty),
+          price: Number(txPrice),
+          currency: txCurrency,
+          date: txDate
+        };
+
+        const updatedTxList = [...transactions, newTx];
+        let updatedWallet = [...walletTxs];
+
+        if (txType === 'BUY' && txDeductWallet) {
+          updatedWallet.push({
+            id: `w_${Date.now()}`,
+            type: 'BUY_DEDUCT',
+            amount: totalCostNative,
+            currency: txCurrency,
+            date: txDate,
+            description: `${newTx.symbol} Alımı`
+          });
+        } else if (txType === 'SELL') {
+          updatedWallet.push({
+            id: `w_${Date.now()}`,
+            type: 'SELL_CREDIT',
+            amount: totalCostNative,
+            currency: txCurrency,
+            date: txDate,
+            description: `${newTx.symbol} Satış Geliri`
+          });
+        }
+
+        saveUserData(updatedTxList, undefined, updatedWallet);
+        setActiveModal(null);
+        setTxSymbol('');
+        setTxName('');
+      };
+
+      // --- 9. CÜZDAN İŞLEMİ ---
+      const handleWalletSubmit = (e) => {
+        e.preventDefault();
+        const newW = {
+          id: `w_${Date.now()}`,
+          type: walletAction,
+          amount: Number(walletAmount),
+          currency: walletCurr,
+          date: new Date().toISOString().split('T')[0],
+          description: walletAction === 'DEPOSIT' ? 'Manuel Para Yatırma' : 'Manuel Para Çekme'
+        };
+        saveUserData(undefined, undefined, [...walletTxs, newW]);
+        setActiveModal(null);
+      };
+
+      // --- 10. AYARLAR KAYDET (%100 KESİN DOĞRULAMASI) ---
+      const totalTargetPct = tempCategories.reduce((s, c) => s + (Number(c.targetPercent) || 0), 0);
+      const isTargetValid = Math.round(totalTargetPct) === 100;
+
+      const handleSaveCategories = () => {
+        if (!isTargetValid) return;
+        saveUserData(undefined, tempCategories);
+        setActiveModal(null);
+      };
+
+      // CSV İndirme
+      const exportCSV = () => {
+        if (holdings.list.length === 0) return;
+        let csv = 'Sembol,Varlık Adı,Kategori,Adet,Ortalama Maliyet,Guncel Fiyat,Para Birimi,Toplam Deger,Kar Zarar,Getiri %\n';
+        holdings.list.forEach(h => {
+          csv += `"${h.symbol}","${h.name}","${h.categoryName}",${h.quantity},${h.avgPrice},${h.currPrice},"${h.currency}",${h.valBase},${h.pnlBase},${h.pnlPct.toFixed(2)}%\n`;
+        });
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `Zettaishi_Portfoy_${new Date().toISOString().split('T')[0]}.csv`;
+        link.click();
+      };
+
+      return (
+        <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
+          
+          {/* ========================================================================= */}
+          {/* 1. ÜST NAVİGASYON BAR (PREVIEW İLE BİREBİR AYNI HEADER) */}
+          {/* ========================================================================= */}
+          <header className="glass-panel rounded-2xl p-4 flex flex-col md:flex-row items-center justify-between gap-4 shadow-2xl">
+            {/* Logo & Marka */}
+            <div className="flex items-center gap-3 w-full md:w-auto justify-between md:justify-start">
+              <div className="w-11 h-11 rounded-xl bg-blue-600 text-white flex items-center justify-center text-2xl shadow-lg shadow-blue-600/30">
+                💎
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h1 className="text-xl font-bold tracking-tight text-white">Zettaishi</h1>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30">PRO</span>
+                </div>
+                <p className="text-xs text-slate-400">Portföy & Varlık Yönetimi</p>
+              </div>
+            </div>
+
+            {/* Canlı Kurlar & Hızlı Nakit Göstergesi */}
+            <div className="hidden lg:flex items-center gap-4 px-4 py-2 rounded-xl bg-slate-800/60 border border-slate-700/60 text-xs">
+              <span className="text-slate-400">💵 USD/TRY: <b className="text-blue-400 font-semibold">{rates.USD_TRY.toFixed(2)} ₺</b></span>
+              <span className="text-slate-600">|</span>
+              <span className="text-slate-400">💶 EUR/TRY: <b className="text-blue-400 font-semibold">{rates.EUR_TRY.toFixed(2)} ₺</b></span>
+              <span className="text-slate-600">|</span>
+              <span className="text-slate-400">💼 Nakit: <b className="text-emerald-400 font-semibold">{formatMoney(walletTotalBase)}</b></span>
+            </div>
+
+            {/* Sağ Üst Kontrol & Modal Butonları */}
+            <div className="flex items-center gap-2 w-full md:w-auto justify-end flex-wrap">
+              {/* Para Birimi Değiştirici */}
+              <select
+                value={baseCurrency}
+                onChange={(e) => saveUserData(undefined, undefined, undefined, undefined, e.target.value)}
+                className="bg-slate-800 border border-slate-700 text-white text-xs font-semibold px-3 py-2 rounded-xl focus:outline-none focus:border-blue-500"
+              >
+                <option value="TRY">₺ TRY</option>
+                <option value="USD">$ USD</option>
+                <option value="EUR">€ EUR</option>
+              </select>
+
+              <button
+                onClick={() => setActiveModal('WALLET')}
+                className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-slate-200 transition"
+              >
+                💵 Cüzdan
+              </button>
+
+              <button
+                onClick={() => setActiveModal('SETTINGS')}
+                className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-slate-200 transition"
+              >
+                ⚙️ Ayarlar
+              </button>
+
+              {currentUser?.role === 'ADMIN' && (
+                <button
+                  onClick={() => setActiveModal('ADMIN')}
+                  className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-slate-200 transition"
+                >
+                  🛡️ Yönetim
+                </button>
+              )}
+
+              <button
+                onClick={() => setActiveModal('ADD_TX')}
+                className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-lg shadow-blue-600/30 transition flex items-center gap-1.5"
+              >
+                <span>➕ İşlem Ekle</span>
+              </button>
+
+              <button
+                onClick={() => setActiveModal('AUTH')}
+                className="px-3 py-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 text-xs font-semibold border border-slate-700"
+                title="Hesap Değiştir / Giriş"
+              >
+                👤 {currentUser ? currentUser.name : 'Giriş'}
+              </button>
+            </div>
+          </header>
+
+          {/* ========================================================================= */}
+          {/* 2. ANA METRİK KARTLARI (4'LÜ LUXURY KARTLAR) */}
+          {/* ========================================================================= */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="glass-panel p-5 rounded-2xl">
+              <span className="text-xs font-semibold uppercase text-slate-400 tracking-wider">Net Portföy Değeri</span>
+              <h2 className="text-2xl font-black text-white mt-1.5">{formatMoney(holdings.totalVal)}</h2>
+              <p className="text-[11px] text-slate-400 mt-1">Açık pozisyonların toplam piyasa değeri</p>
+            </div>
+
+            <div className="glass-panel p-5 rounded-2xl">
+              <span className="text-xs font-semibold uppercase text-slate-400 tracking-wider">Toplam Ana Para</span>
+              <h2 className="text-2xl font-black text-slate-200 mt-1.5">{formatMoney(holdings.totalCost)}</h2>
+              <p className="text-[11px] text-slate-400 mt-1">Yatırılan toplam sermaye maliyeti</p>
+            </div>
+
+            <div className="glass-panel p-5 rounded-2xl">
+              <span className="text-xs font-semibold uppercase text-slate-400 tracking-wider">Net Kâr / Zarar</span>
+              <div className="flex items-baseline gap-2 mt-1.5">
+                <h2 className={`text-2xl font-black ${holdings.totalVal >= holdings.totalCost ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {formatMoney(holdings.totalVal - holdings.totalCost)}
+                </h2>
+                <span className={`text-xs font-bold px-2 py-0.5 rounded ${holdings.totalVal >= holdings.totalCost ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
+                  {holdings.totalCost > 0 ? `${(((holdings.totalVal - holdings.totalCost) / holdings.totalCost) * 100).toFixed(2)}%` : '%0.00'}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-1">Gerçekleşmemiş anlık kâr/zarar</p>
+            </div>
+
+            <div className="glass-panel p-5 rounded-2xl">
+              <span className="text-xs font-semibold uppercase text-slate-400 tracking-wider">Toplam Varlıklar (Nakit Dahil)</span>
+              <h2 className="text-2xl font-black text-blue-400 mt-1.5">{formatMoney(holdings.totalAssets)}</h2>
+              <p className="text-[11px] text-slate-400 mt-1">Portföy + Cüzdandaki kullanılabilir nakit</p>
+            </div>
+          </div>
+
+          {/* ========================================================================= */}
+          {/* 3. DİNAMİK YENİDEN DENGELEME (REBALANCE) PANELİ */}
+          {/* ========================================================================= */}
+          {holdings.totalVal > 0 && (
+            <div className="glass-panel rounded-2xl p-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                    <span>⚖️</span> Dinamik Yeniden Dengeleme (Rebalance) Önerileri
+                  </h3>
+                  <p className="text-xs text-slate-400">Hedef varlık dağılımına ulaşmak için matematiksel alım ve kâr realizasyonu tavsiyeleri</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
+                {categories.map(cat => {
+                  const catHoldingsVal = holdings.list.filter(h => h.category === cat.id).reduce((s, h) => s + h.valBase, 0);
+                  const currPct = (catHoldingsVal / holdings.totalVal) * 100;
+                  const targetVal = (cat.targetPercent / 100) * holdings.totalVal;
+                  const diffVal = targetVal - catHoldingsVal;
+
+                  if (diffVal > 100) {
+                    return (
+                      <div key={cat.id} className="p-3.5 rounded-xl bg-emerald-950/20 border border-emerald-800/40 border-l-4 border-l-emerald-500">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-emerald-400">🟢 {cat.name} - ALIM ÖNERİSİ</span>
+                          <span className="text-xs font-black text-emerald-400">+{formatMoney(Math.abs(diffVal))}</span>
+                        </div>
+                        <p className="text-[11px] text-slate-300 mt-1">
+                          Mevcut: <b>%{currPct.toFixed(1)}</b> → Hedef: <b>%{cat.targetPercent.toFixed(1)}</b>
+                        </p>
+                      </div>
+                    );
+                  } else if (diffVal < -100) {
+                    return (
+                      <div key={cat.id} className="p-3.5 rounded-xl bg-rose-950/20 border border-rose-800/40 border-l-4 border-l-rose-500">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-rose-400">🔴 {cat.name} - KÂR REALİZASYONU / SATIM</span>
+                          <span className="text-xs font-black text-rose-400">-{formatMoney(Math.abs(diffVal))}</span>
+                        </div>
+                        <p className="text-[11px] text-slate-300 mt-1">
+                          Mevcut: <b>%{currPct.toFixed(1)}</b> → Hedef: <b>%{cat.targetPercent.toFixed(1)}</b>
+                        </p>
+                      </div>
+                    );
+                  }
+                  return null;
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* ========================================================================= */}
+          {/* 4. GRAFİK & AÇIK POZİSYONLAR TABLOSU */}
+          {/* ========================================================================= */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            {/* Sol: Pasta Grafiği */}
+            <div className="glass-panel rounded-2xl p-5 flex flex-col items-center justify-between">
+              <h3 className="text-sm font-bold text-white w-full text-left">🎯 Varlık Dağılımı</h3>
+              <div className="relative w-full h-64 my-auto">
+                {holdings.list.length > 0 ? (
+                  <canvas ref={chartRef}></canvas>
+                ) : (
+                  <div className="h-full flex items-center justify-center text-xs text-slate-500">
+                    Henüz açık pozisyon bulunmuyor
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Sağ: Pozisyon Tablosu */}
+            <div className="lg:col-span-2 glass-panel rounded-2xl p-5 flex flex-col">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-sm font-bold text-white">📋 Açık Pozisyonlar</h3>
+                  <p className="text-xs text-slate-400">{holdings.list.length} adet aktif varlık</p>
+                </div>
+                {holdings.list.length > 0 && (
+                  <button
+                    onClick={exportCSV}
+                    className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 border border-slate-700 transition"
+                  >
+                    📥 CSV İndir
+                  </button>
+                )}
+              </div>
+
+              <div className="overflow-x-auto custom-scrollbar flex-1">
+                {holdings.list.length > 0 ? (
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-800 text-slate-400">
+                        <th className="pb-3 font-semibold">Sembol</th>
+                        <th className="pb-3 font-semibold">Kategori</th>
+                        <th className="pb-3 font-semibold text-right">Adet</th>
+                        <th className="pb-3 font-semibold text-right">Maliyet</th>
+                        <th className="pb-3 font-semibold text-right">Toplam Değer</th>
+                        <th className="pb-3 font-semibold text-right">Kâr / Zarar</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60 text-slate-200">
+                      {holdings.list.map(h => (
+                        <tr key={h.symbol} className="hover:bg-slate-800/40 transition">
+                          <td className="py-3 font-bold text-white">
+                            {h.symbol}
+                            <span className="block text-[10px] font-normal text-slate-400">{h.name}</span>
+                          </td>
+                          <td className="py-3 text-slate-400">{h.categoryName}</td>
+                          <td className="py-3 text-right font-medium">{h.quantity.toLocaleString('tr-TR')}</td>
+                          <td className="py-3 text-right font-medium">{formatMoney(h.avgPrice, h.currency)}</td>
+                          <td className="py-3 text-right font-bold text-white">{formatMoney(h.valBase)}</td>
+                          <td className="py-3 text-right">
+                            <span className={`font-bold ${h.pnlBase >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                              {formatMoney(h.pnlBase)}
+                            </span>
+                            <span className={`block text-[10px] ${h.pnlPct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                              {h.pnlPct >= 0 ? `+${h.pnlPct.toFixed(2)}%` : `${h.pnlPct.toFixed(2)}%`}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : (
+                  <div className="py-16 text-center text-xs text-slate-500">
+                    Portföyünüz temiz ve sıfır durumdadır. Sağ üstteki <b>"➕ İşlem Ekle"</b> butonundan ilk varlığınızı ekleyin.
+                  </div>
+                )}
+              </div>
+            </div>
+
+          </div>
+
+          {/* ========================================================================= */}
+          {/* MODAL 1: YENİ İŞLEM EKLE (ADD TRANSACTION) */}
+          {/* ========================================================================= */}
+          {activeModal === 'ADD_TX' && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+              <div className="bg-slate-900 border border-slate-700 w-full max-w-lg rounded-2xl p-6 shadow-2xl space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                  <h3 className="text-base font-bold text-white">➕ Yeni Portföy İşlemi Girişi</h3>
+                  <button onClick={() => setActiveModal(null)} className="text-slate-400 hover:text-white">✕</button>
+                </div>
+
+                <form onSubmit={handleAddTx} className="space-y-4">
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setTxType('BUY')}
+                      className={`flex-1 py-2 rounded-xl text-xs font-bold transition ${txType === 'BUY' ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-400'}`}
+                    >
+                      BUY (Alım)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTxType('SELL')}
+                      className={`flex-1 py-2 rounded-xl text-xs font-bold transition ${txType === 'SELL' ? 'bg-rose-600 text-white' : 'bg-slate-800 text-slate-400'}`}
+                    >
+                      SELL (Satım)
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1">Varlık Sembolü *</label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="Örn: THYAO, AAPL, BTC"
+                        value={txSymbol}
+                        onChange={(e) => setTxSymbol(e.target.value)}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white uppercase focus:outline-none focus:border-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1">Kategori</label>
+                      <select
+                        value={txCat}
+                        onChange={(e) => setTxCat(e.target.value)}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
+                      >
+                        {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1">Adet</label>
+                      <input
+                        type="number"
+                        step="any"
+                        min="0.0001"
+                        required
+                        value={txQty}
+                        onChange={(e) => setTxQty(e.target.value)}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1">Birim Fiyat</label>
+                      <input
+                        type="number"
+                        step="any"
+                        min="0.0001"
+                        required
+                        value={txPrice}
+                        onChange={(e) => setTxPrice(e.target.value)}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1">Para Birimi</label>
+                      <select
+                        value={txCurrency}
+                        onChange={(e) => setTxCurrency(e.target.value)}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
+                      >
+                        <option value="TRY">TRY</option>
+                        <option value="USD">USD</option>
+                        <option value="EUR">EUR</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {txType === 'BUY' && (
+                    <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer pt-1">
+                      <input
+                        type="checkbox"
+                        checked={txDeductWallet}
+                        onChange={(e) => setTxDeductWallet(e.target.checked)}
+                        className="rounded bg-slate-800 border-slate-700 text-blue-600"
+                      />
+                      <span>Bu tutarı Nakit Cüzdanımdan düş</span>
+                    </label>
+                  )}
+
+                  <div className="pt-2 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setActiveModal(null)}
+                      className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold"
+                    >
+                      Vazgeç
+                    </button>
+                    <button
+                      type="submit"
+                      className="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-lg shadow-blue-600/30"
+                    >
+                      İşlemi Kaydet
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* ========================================================================= */}
+          {/* MODAL 2: NAKİT CÜZDANI (WALLET) */}
+          {/* ========================================================================= */}
+          {activeModal === 'WALLET' && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+              <div className="bg-slate-900 border border-slate-700 w-full max-w-md rounded-2xl p-6 shadow-2xl space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                  <h3 className="text-base font-bold text-white">💵 Nakit Cüzdanı (Dry Powder)</h3>
+                  <button onClick={() => setActiveModal(null)} className="text-slate-400 hover:text-white">✕</button>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div className="p-3 rounded-xl bg-slate-800/80 border border-slate-700">
+                    <span className="text-[10px] text-slate-400">TRY</span>
+                    <p className="text-xs font-bold text-white mt-1">{formatMoney(walletBalances.TRY, 'TRY')}</p>
+                  </div>
+                  <div className="p-3 rounded-xl bg-slate-800/80 border border-slate-700">
+                    <span className="text-[10px] text-slate-400">USD</span>
+                    <p className="text-xs font-bold text-white mt-1">{formatMoney(walletBalances.USD, 'USD')}</p>
+                  </div>
+                  <div className="p-3 rounded-xl bg-slate-800/80 border border-slate-700">
+                    <span className="text-[10px] text-slate-400">EUR</span>
+                    <p className="text-xs font-bold text-white mt-1">{formatMoney(walletBalances.EUR, 'EUR')}</p>
+                  </div>
+                </div>
+
+                <form onSubmit={handleWalletSubmit} className="space-y-3 pt-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    <select
+                      value={walletAction}
+                      onChange={(e) => setWalletAction(e.target.value)}
+                      className="bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none"
+                    >
+                      <option value="DEPOSIT">Para Yatır</option>
+                      <option value="WITHDRAW">Para Çek</option>
+                    </select>
+                    <select
+                      value={walletCurr}
+                      onChange={(e) => setWalletCurr(e.target.value)}
+                      className="bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none"
+                    >
+                      <option value="TRY">TRY</option>
+                      <option value="USD">USD</option>
+                      <option value="EUR">EUR</option>
+                    </select>
+                  </div>
+
+                  <input
+                    type="number"
+                    step="any"
+                    min="1"
+                    required
+                    value={walletAmount}
+                    onChange={(e) => setWalletAmount(e.target.value)}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none"
+                    placeholder="Tutar"
+                  />
+
+                  <button
+                    type="submit"
+                    className="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold"
+                  >
+                    Cüzdanı Güncelle
+                  </button>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* ========================================================================= */}
+          {/* MODAL 3: AYARLAR (%100 KESİN DOĞRULAMASI) */}
+          {/* ========================================================================= */}
+          {activeModal === 'SETTINGS' && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+              <div className="bg-slate-900 border border-slate-700 w-full max-w-lg rounded-2xl p-6 shadow-2xl space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                  <div>
+                    <h3 className="text-base font-bold text-white">🎯 Kategori Hedef Dağılımı</h3>
+                    <p className="text-xs text-slate-400">Hedeflerin toplamı kesinlikle tam olarak %100 olmalıdır.</p>
+                  </div>
+                  <button onClick={() => setActiveModal(null)} className="text-slate-400 hover:text-white">✕</button>
+                </div>
+
+                <div className="space-y-2.5 max-h-64 overflow-y-auto pr-1">
+                  {tempCategories.map((c, idx) => (
+                    <div key={c.id} className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={c.name}
+                        onChange={(e) => {
+                          const updated = [...tempCategories];
+                          updated[idx].name = e.target.value;
+                          setTempCategories(updated);
+                        }}
+                        className="flex-1 bg-slate-800 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white"
+                      />
+                      <div className="flex items-center gap-1 w-24">
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          value={c.targetPercent}
+                          onChange={(e) => {
+                            const updated = [...tempCategories];
+                            updated[idx].targetPercent = Number(e.target.value);
+                            setTempCategories(updated);
+                          }}
+                          className="w-full bg-slate-800 border border-slate-700 rounded-xl px-2 py-1.5 text-xs text-white text-right"
+                        />
+                        <span className="text-xs text-slate-400">%</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="pt-2 border-t border-slate-800">
+                  <div className="flex items-center justify-between mb-3 text-xs">
+                    <span className="text-slate-400">Toplam Hedef:</span>
+                    <span className={`font-bold ${isTargetValid ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      %{totalTargetPct.toFixed(1)} {isTargetValid ? '(Geçerli)' : '(Kilitli - %100 Olmalı)'}
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={!isTargetValid}
+                    onClick={handleSaveCategories}
+                    className={`w-full py-2.5 rounded-xl text-xs font-bold transition ${isTargetValid ? 'bg-blue-600 hover:bg-blue-500 text-white cursor-pointer shadow-lg shadow-blue-600/30' : 'bg-slate-800 border border-slate-700 text-slate-500 cursor-not-allowed'}`}
+                  >
+                    {isTargetValid ? 'Ayarları Kaydet & Uygula' : 'Hedef Toplamı %100 Olmalıdır'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ========================================================================= */}
+          {/* MODAL 4: KİMLİK DOĞRULAMA (LOGIN / REGISTER) */}
+          {/* ========================================================================= */}
+          {activeModal === 'AUTH' && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+              <div className="bg-slate-900 border border-slate-700 w-full max-w-md rounded-2xl p-6 shadow-2xl space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                  <h3 className="text-base font-bold text-white">👤 Kullanıcı & Portföy Hesabı</h3>
+                  <button onClick={() => setActiveModal(null)} className="text-slate-400 hover:text-white">✕</button>
+                </div>
+
+                <div className="flex border-b border-slate-800 text-xs font-semibold">
+                  <button
+                    onClick={() => { setAuthTab('LOGIN'); setAuthError(''); }}
+                    className={`flex-1 py-2 border-b-2 ${authTab === 'LOGIN' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400'}`}
+                  >
+                    Giriş Yap
+                  </button>
+                  <button
+                    onClick={() => { setAuthTab('REGISTER'); setAuthError(''); }}
+                    className={`flex-1 py-2 border-b-2 ${authTab === 'REGISTER' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400'}`}
+                  >
+                    Yeni Hesap
+                  </button>
+                </div>
+
+                {authError && (
+                  <div className="p-3 rounded-xl bg-rose-950/40 border border-rose-800 text-rose-300 text-xs">
+                    {authError}
+                  </div>
+                )}
+
+                {authTab === 'LOGIN' ? (
+                  <form onSubmit={handleAuthLogin} className="space-y-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1">E-Posta</label>
+                      <input
+                        type="email"
+                        required
+                        value={loginEmail}
+                        onChange={(e) => setLoginEmail(e.target.value)}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white"
+                        placeholder="ornek@hesap.com"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1">Şifre</label>
+                      <input
+                        type="password"
+                        required
+                        value={loginPassword}
+                        onChange={(e) => setLoginPassword(e.target.value)}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white"
+                        placeholder="••••••••"
+                      />
+                    </div>
+                    <button type="submit" className="w-full py-2.5 rounded-xl bg-blue-600 text-white text-xs font-bold">
+                      Giriş Yap
+                    </button>
+                  </form>
+                ) : (
+                  <form onSubmit={handleAuthRegister} className="space-y-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1">Ad Soyad</label>
+                      <input
+                        type="text"
+                        required
+                        value={regName}
+                        onChange={(e) => setRegName(e.target.value)}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1">E-Posta</label>
+                      <input
+                        type="email"
+                        required
+                        value={regEmail}
+                        onChange={(e) => setRegEmail(e.target.value)}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1">Şifre (En az 6 karakter)</label>
+                      <input
+                        type="password"
+                        required
+                        minLength={6}
+                        value={regPassword}
+                        onChange={(e) => setRegPassword(e.target.value)}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1">Şifre Onayı</label>
+                      <input
+                        type="password"
+                        required
+                        minLength={6}
+                        value={regPasswordConfirm}
+                        onChange={(e) => setRegPasswordConfirm(e.target.value)}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white"
+                      />
+                    </div>
+                    <button type="submit" className="w-full py-2.5 rounded-xl bg-blue-600 text-white text-xs font-bold">
+                      Hesap Oluştur & Başla
+                    </button>
+                  </form>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ========================================================================= */}
+          {/* MODAL 5: SİSTEM YÖNETİMİ (ADMIN PANEL) */}
+          {/* ========================================================================= */}
+          {activeModal === 'ADMIN' && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+              <div className="bg-slate-900 border border-slate-700 w-full max-w-lg rounded-2xl p-6 shadow-2xl space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                  <h3 className="text-base font-bold text-white">🛡️ Sistem Kullanıcıları</h3>
+                  <button onClick={() => setActiveModal(null)} className="text-slate-400 hover:text-white">✕</button>
+                </div>
+                <div className="space-y-2">
+                  {users.map(u => (
+                    <div key={u.id} className="p-3 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-between text-xs">
+                      <div>
+                        <span className="font-bold text-white">{u.name}</span>
+                        <span className="block text-[10px] text-slate-400">{u.email}</span>
+                      </div>
+                      <span className={`px-2 py-0.5 rounded font-bold ${u.role === 'ADMIN' ? 'bg-purple-500/20 text-purple-400' : 'bg-slate-700 text-slate-300'}`}>
+                        {u.role}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+        </div>
+      );
+    }
+
+    ReactDOM.render(<App />, document.getElementById('root'));
+  </script>
+</body>
+</html>
