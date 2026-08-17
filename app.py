@@ -514,7 +514,7 @@ elif active_tab == "➕ İşlem Ekle":
         t_name = st.text_input("Varlık Adı / Açıklama", placeholder="Örn: Türk Hava Yolları")
         
     with col_b:
-        t_curr = st.selectbox("Para Birimi", ["TRY", "USD", "EUR"])
+        t_curr = st.selectbox("Para Birimi", ["TRY", "USD", "EUR"], key="tx_currency_select")
         t_qty = st.number_input("Adet / Miktar", min_value=0.0001, value=10.0, step=1.0)
         t_price = st.number_input(f"Birim Fiyat ({t_curr})", min_value=0.0001, value=100.0, step=1.0)
         t_date = st.date_input("İşlem Tarihi", value=datetime.now())
